@@ -1,0 +1,4 @@
+# Bibliotecas usadas só no desenvolvimento (testes). O servidor não instala esta lista.
+-r requirements.txt
+pytest>=8.4
+httpx>=0.28

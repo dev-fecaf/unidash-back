@@ -1,0 +1,8 @@
+# Bibliotecas do unidash-back (Python 3.14)
+fastapi>=0.118
+uvicorn[standard]>=0.37
+pydantic-settings>=2.11
+sqlalchemy>=2.0.43
+psycopg[binary]>=3.2.10
+alembic>=1.16
+pyjwt>=2.10
