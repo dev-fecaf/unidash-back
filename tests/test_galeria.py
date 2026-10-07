@@ -12,8 +12,13 @@ from app.main import app
 from tests.apoio import ingresso, usuario
 
 EXEMPLO = galeria.DashboardResumo(
-    hash="a" * 32, nome="Executivo", descricao=None, status="rascunho", categoria="Gestão",
+    hash="a" * 32, slug="executivo", nome="Executivo", descricao=None, status="rascunho", categoria="Gestão",
     paginas=2, responsavel_login="leticia.dias", atualizado_em=datetime(2026, 10, 6, tzinfo=timezone.utc),
+)
+
+PREVIA = galeria.DashboardPrevia(
+    hash="a" * 32, slug="executivo", nome="Executivo", status="rascunho",
+    paginas=[galeria.PaginaPrevia(codigo="c" * 32, nome="Visão geral")],
 )
 
 
@@ -22,6 +27,7 @@ def cliente(monkeypatch):
     estado = {"usuario": usuario()}
     monkeypatch.setattr(usuarios, "carregar_usuario", lambda _c, _id: estado["usuario"])
     monkeypatch.setattr(galeria, "listar_dashboards", lambda _c: [EXEMPLO])
+    monkeypatch.setattr(galeria, "buscar_para_previa", lambda _c, h: PREVIA if h == PREVIA.hash else None)
     app.dependency_overrides[obter_conexao] = lambda: None
     c = TestClient(app)
     c.estado = estado
@@ -49,3 +55,27 @@ def test_lista_os_dashboards(cliente):
     assert resposta.status_code == 200
     assert resposta.json()[0]["nome"] == "Executivo"
     assert resposta.json()[0]["paginas"] == 2
+
+
+def test_lista_traz_o_identificador_da_pasta(cliente):
+    _entrar(cliente)
+    assert cliente.get("/api/v1/galeria/dashboards").json()[0]["slug"] == "executivo"
+
+
+def test_previa_traz_paginas_do_banco_em_qualquer_status(cliente):
+    _entrar(cliente)
+    resposta = cliente.get(f"/api/v1/galeria/dashboards/{'a' * 32}")
+    assert resposta.status_code == 200
+    assert resposta.json()["status"] == "rascunho"
+    assert [p["nome"] for p in resposta.json()["paginas"]] == ["Visão geral"]
+
+
+def test_previa_de_hash_inexistente_responde_404(cliente):
+    _entrar(cliente)
+    assert cliente.get(f"/api/v1/galeria/dashboards/{'b' * 32}").status_code == 404
+
+
+def test_previa_exige_a_permissao_da_galeria(cliente):
+    _entrar(cliente)
+    cliente.estado["usuario"] = usuario(permissoes=frozenset({"hub.dashboards.acessar"}))
+    assert cliente.get(f"/api/v1/galeria/dashboards/{'a' * 32}").status_code == 403
