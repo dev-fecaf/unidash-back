@@ -78,7 +78,9 @@ class PaginaOut(BaseModel):
 
 
 class IdentificadorOut(BaseModel):
-    slug: str  # identificador que o dashboard vai receber se for criado com este nome
+    slug: str  # identificador (= schema no DW) que o dashboard vai receber se for criado com este nome
+    disponivel: bool = True  # False: o cadastro seria recusado (motivo explica)
+    motivo: str | None = None
 
 
 class DashboardResumo(BaseModel):
@@ -90,6 +92,11 @@ class DashboardResumo(BaseModel):
     paginas: int
     responsavel_login: str | None
     atualizado_em: datetime
+
+
+class SchemaDwOut(BaseModel):
+    nome: str  # nome do schema no DW (o próprio identificador)
+    situacao: Literal["existe", "nao_existe", "criado", "ja_existia", "desligado", "erro"]
 
 
 class DashboardDetalhe(BaseModel):
@@ -104,3 +111,5 @@ class DashboardDetalhe(BaseModel):
     criado_em: datetime
     atualizado_em: datetime
     paginas: list[PaginaOut]  # ativas primeiro, na ordem; depois as desativadas
+    schema_dw: SchemaDwOut | None = None  # schema do dashboard no DW e se ele existe (só no Gerador)
+    schema_gravado: str | None = Field(default=None, exclude=True)  # coluna schema_dw (uso interno)

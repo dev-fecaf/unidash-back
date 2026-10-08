@@ -7,6 +7,7 @@ temporária, com variáveis de mentira, e o banco é simulado quando preciso.
 import pytest
 
 from app.core.config import obter_config
+from app.db.dw import obter_engine_dw
 from app.db.sessao import obter_engine
 from app.dominios.embed.tokens import uso_unico_hub
 from app.dominios.portal.tokens import uso_unico
@@ -22,6 +23,7 @@ VARIAVEIS_DE_TESTE = {
     "SESSAO_SECRET": "segredo-da-sessao-de-teste-com-pelo-menos-32-caracteres",
     "EMBED_HUB_SECRET": "segredo-do-hub-de-teste-com-pelo-menos-32-caracteres",
     "EMBED_HUB_ORIGIN": "https://hub.teste",
+    "DW_HOST": "",  # DW desligado; os testes do schema simulam o DW
 }
 
 
@@ -32,8 +34,10 @@ def ambiente_isolado(monkeypatch, tmp_path):
         monkeypatch.setenv(nome, valor)
     obter_config.cache_clear()
     obter_engine.cache_clear()
+    obter_engine_dw.cache_clear()
     uso_unico.limpar()
     uso_unico_hub.limpar()
     yield
     obter_config.cache_clear()
     obter_engine.cache_clear()
+    obter_engine_dw.cache_clear()

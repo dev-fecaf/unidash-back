@@ -25,6 +25,15 @@ class Config(BaseSettings):
     db_user: str
     db_password: SecretStr  # SecretStr evita que a senha apareça em logs e mensagens
 
+    # DW do UniData (unidata_dw_hml / unidata_dw_prd). Vazio (DW_HOST) = DW desligado.
+    # Hoje é usado pelo Gerador para criar o schema de cada dashboard novo; por isso o usuário
+    # precisa ter permissão para criar schemas (CREATE no banco).
+    dw_host: str = ""
+    dw_port: int = 5432
+    dw_name: str = ""
+    dw_user: str = ""
+    dw_password: SecretStr = SecretStr("")
+
     # Entrada pelo portal UniData (área do time de dados).
     # Segredo combinado com o UniData: assina o "ingresso" de 60 s gerado pelo portal.
     portal_ingresso_secret: SecretStr = SecretStr("")

@@ -8,6 +8,7 @@ from app.core.config import obter_config
 from app.core.erros import registrar_tratadores_de_erro
 from app.core.rastreio import MiddlewareRastreio, configurar_logs
 from app.dominios.analises.rotas import router as analises_router
+from app.dominios.dados import router as dados_router
 from app.dominios.embed.rotas import router as embed_router
 from app.dominios.galeria.rotas import router as galeria_router
 from app.dominios.gerador.rotas import router as gerador_router
@@ -37,3 +38,4 @@ app.include_router(inicio_router, prefix="/api/v1")
 app.include_router(analises_router, prefix="/api/v1")
 app.include_router(gerador_router, prefix="/api/v1")
 app.include_router(embed_router, prefix="/api/v1")
+app.include_router(dados_router, prefix="/api/v1")  # endpoints de cada dashboard

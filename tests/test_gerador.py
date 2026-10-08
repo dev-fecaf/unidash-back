@@ -109,10 +109,56 @@ def test_nome_vazio_e_recusado_antes_de_chegar_ao_banco(cliente):
 
 
 def test_previa_do_identificador(cliente, monkeypatch):
-    monkeypatch.setattr(servico, "proximo_slug", lambda _c, nome: "executivo_financeiro_2")
+    monkeypatch.setattr(servico, "conferir_identificador_dashboard", lambda _c, nome: "executivo_financeiro")
     resposta = cliente.get("/api/v1/gerador/identificador", params={"nome": "Executivo Financeiro"})
     assert resposta.status_code == 200
-    assert resposta.json() == {"slug": "executivo_financeiro_2"}
+    assert resposta.json() == {"slug": "executivo_financeiro", "disponivel": True, "motivo": None}
+
+
+def test_previa_avisa_quando_o_identificador_nao_pode_ser_usado(cliente, monkeypatch):
+    def recusar(_c, _nome):
+        raise servico.ErroCadastro(409, "O schema \"executivo\" já é do dashboard \"Executivo\".")
+
+    monkeypatch.setattr(servico, "conferir_identificador_dashboard", recusar)
+    corpo = cliente.get("/api/v1/gerador/identificador", params={"nome": "Executivo!"}).json()
+    assert corpo["slug"] == "executivo" and corpo["disponivel"] is False and "já é do dashboard" in corpo["motivo"]
+
+
+class BancoSimulado:
+    """Responde às consultas de conferir_identificador_dashboard com a linha que já existir."""
+
+    def __init__(self, existente=None):
+        self.existente = existente
+
+    def execute(self, _sql, _parametros):
+        linha = self.existente
+        return type("R", (), {"mappings": lambda _s: type("M", (), {"first": lambda _m: linha})()})()
+
+
+@pytest.mark.parametrize(
+    "nome, existente, status_erro",
+    [
+        ("Fat", None, 422),  # reservado no DW: recusa, sem prefixo
+        ("Public", None, 422),
+        ("Executivo!", {"nome": "Executivo", "status": "publicado"}, 409),  # mesmo schema de outro dashboard
+        ("Executivo", {"nome": "Executivo", "status": "desativado"}, 409),  # desativado também conta
+    ],
+)
+def test_identificador_repetido_ou_reservado_e_recusado(nome, existente, status_erro):
+    with pytest.raises(servico.ErroCadastro) as erro:
+        servico.conferir_identificador_dashboard(BancoSimulado(existente), nome, consultar_dw=False)
+    assert erro.value.status == status_erro
+
+
+def test_identificador_livre_passa_sem_sufixo():
+    assert servico.conferir_identificador_dashboard(BancoSimulado(), "Executivo", consultar_dw=False) == "executivo"
+
+
+def test_schema_que_ja_existe_no_dw_e_recusado(monkeypatch):
+    monkeypatch.setattr(servico.schema_dw, "consultar", lambda slug: "existe")
+    with pytest.raises(servico.ErroCadastro) as erro:
+        servico.conferir_identificador_dashboard(BancoSimulado(), "Financeiro")
+    assert erro.value.status == 409 and "no DW" in erro.value.mensagem
 
 
 def test_identificador_so_aceita_tabelas_conhecidas():

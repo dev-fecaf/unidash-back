@@ -13,6 +13,8 @@ from app.dominios.gerador.identificador import TAMANHO_MAXIMO, com_sufixo, gerar
         ("Matrículas & Evasão – 2026", "matriculas_evasao_2026"),
         ("  EAD   (Polos)  ", "ead_polos"),
         ("2026 Captação", "d_2026_captacao"),  # schema não pode começar com número
+        ("Fat", "fat"),  # reservado: não ganha prefixo, o cadastro é que recusa
+        ("Fatura", "fatura"),
         ("Ação-Social/Comunitária", "acao_social_comunitaria"),
         ("___", ""),
         ("!!!", ""),

@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import Connection
 
 from app.db.sessao import obter_conexao
-from app.dominios.gerador import servico
+from app.dominios.gerador import schema_dw, servico
+from app.dominios.gerador.identificador import gerar_slug
 from app.dominios.gerador.modelos import (
     CategoriaAlterarIn,
     CategoriaIn,
@@ -18,6 +19,7 @@ from app.dominios.gerador.modelos import (
     DashboardResumo,
     IdentificadorOut,
     OrdemCategoriasIn,
+    SchemaDwOut,
 )
 from app.dominios.portal.dependencias import exigir
 from app.dominios.portal.usuarios import UsuarioPortal
@@ -38,6 +40,16 @@ def _executar(funcao: Callable, *args):
         return funcao(*args)
     except servico.ErroCadastro as erro:
         raise HTTPException(erro.status, erro.mensagem) from None
+
+
+def _nome_schema(dashboard: DashboardDetalhe) -> str:
+    """Schema do dashboard no DW: a coluna schema_dw; nos antigos (vazia), o identificador."""
+    return dashboard.schema_gravado or dashboard.slug
+
+
+def _com_schema(dashboard: DashboardDetalhe, situacao: str) -> DashboardDetalhe:
+    """Junta ao dashboard a situação do schema dele no DW (ver schema_dw.py)."""
+    return dashboard.model_copy(update={"schema_dw": SchemaDwOut(nome=_nome_schema(dashboard), situacao=situacao)})
 
 
 # ---------------------------------------------------------------- categorias
@@ -82,24 +94,36 @@ def dashboards(_u: Usuario, conexao: Conexao):
 
 @router.get("/identificador", response_model=IdentificadorOut, summary="Prévia do identificador",
             description="Identificador (slug) que um dashboard novo com este nome vai receber: minúsculas, sem acento, "
-            "\"_\" no lugar de espaços; com _2, _3... se já existir. Usado na prévia em tempo real do formulário.")
+            "\"_\" no lugar de espaços. É também o nome do schema no DW. `disponivel` = false quando o cadastro "
+            "seria recusado (identificador de outro dashboard, nome reservado ou schema que já existe no DW). "
+            "Usado na prévia em tempo real do formulário.")
 def identificador(nome: str, _u: Usuario, conexao: Conexao):
-    return IdentificadorOut(slug=_executar(servico.proximo_slug, conexao, nome))
+    slug = gerar_slug(nome)
+    if not slug:
+        raise HTTPException(422, "O nome precisa ter pelo menos uma letra ou um número.")
+    try:
+        servico.conferir_identificador_dashboard(conexao, nome)
+    except servico.ErroCadastro as erro:
+        return IdentificadorOut(slug=slug, disponivel=False, motivo=erro.mensagem)
+    return IdentificadorOut(slug=slug)
 
 
 @router.get("/dashboards/{hash_}", response_model=DashboardDetalhe, summary="Ver um dashboard",
             description="O dashboard com as páginas: ativas primeiro, na ordem; depois as desativadas.")
 def dashboard(hash_: str, _u: Usuario, conexao: Conexao):
-    return _executar(servico.buscar_dashboard, conexao, hash_)
+    dashboard = _executar(servico.buscar_dashboard, conexao, hash_)
+    return _com_schema(dashboard, schema_dw.consultar(_nome_schema(dashboard)))
 
 
 @router.post("/dashboards", response_model=DashboardDetalhe, status_code=201, summary="Criar dashboard",
              description="Cria o dashboard e as páginas na ordem enviada. O banco gera o hash e os códigos. "
-             "Todo dashboard precisa de pelo menos 1 página; nome repetido entre os não desativados dá 409.")
+             "Todo dashboard precisa de pelo menos 1 página; nome repetido entre os não desativados dá 409. "
+             "Depois de gravar, cria no DW o schema vazio com o nome do identificador (`schema_dw`); "
+             "se o DW falhar, o dashboard continua criado e `schema_dw.situacao` vem `erro` ou `desligado`.")
 def criar_dashboard(dados: DashboardIn, usuario: Usuario, conexao: Conexao):
     dashboard = _executar(servico.criar_dashboard, conexao, dados, usuario.email)
     logger.info("Dashboard criado: %s [%s] (por %s)", dashboard.nome, dashboard.hash, usuario.email)
-    return dashboard
+    return _com_schema(dashboard, schema_dw.criar(_nome_schema(dashboard)))
 
 
 @router.put("/dashboards/{hash_}", response_model=DashboardDetalhe, summary="Alterar dashboard",
@@ -108,4 +132,17 @@ def criar_dashboard(dados: DashboardIn, usuario: Usuario, conexao: Conexao):
 def alterar_dashboard(hash_: str, dados: DashboardIn, usuario: Usuario, conexao: Conexao):
     dashboard = _executar(servico.alterar_dashboard, conexao, hash_, dados)
     logger.info("Dashboard alterado: %s [%s] status=%s (por %s)", dashboard.nome, hash_, dashboard.status, usuario.email)
-    return dashboard
+    return _com_schema(dashboard, schema_dw.consultar(_nome_schema(dashboard)))
+
+
+@router.post("/dashboards/{hash_}/schema-dw", response_model=SchemaDwOut, summary="Criar o schema no DW",
+             description="Cria no DW o schema vazio do dashboard (nome = identificador). Para quando a criação "
+             "automática falhou. Se já existir, não mexe (`ja_existia`).")
+def criar_schema_dw(hash_: str, usuario: Usuario, conexao: Conexao):
+    dashboard = _executar(servico.buscar_dashboard, conexao, hash_)
+    nome = _nome_schema(dashboard)
+    situacao = schema_dw.criar(nome)
+    if situacao in ("criado", "ja_existia") and not dashboard.schema_gravado:
+        servico.gravar_schema_dw(conexao, hash_, nome)  # dashboards de antes da coluna schema_dw
+    logger.info("Schema no DW de %s [%s]: %s %s (por %s)", dashboard.nome, hash_, nome, situacao, usuario.email)
+    return SchemaDwOut(nome=nome, situacao=situacao)

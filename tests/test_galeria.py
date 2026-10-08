@@ -68,6 +68,9 @@ def test_previa_traz_paginas_do_banco_em_qualquer_status(cliente):
     assert resposta.status_code == 200
     assert resposta.json()["status"] == "rascunho"
     assert [p["nome"] for p in resposta.json()["paginas"]] == ["Visão geral"]
+    # DW desligado nos testes: o painel "Onde editar" mostra o nome do schema e a situação
+    assert resposta.json()["schema_dw"] == {"nome": "executivo", "situacao": "desligado"}
+    assert "schema_nome" not in resposta.json()
 
 
 def test_previa_de_hash_inexistente_responde_404(cliente):

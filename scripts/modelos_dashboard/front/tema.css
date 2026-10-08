@@ -1,0 +1,27 @@
+/* Tema do dashboard "__NOME_TEXTO__": as cores DESTE dashboard. Criado pelo comando novo_dashboard em __DATA__.
+
+   Vale só dentro dele: o layout coloca a classe .dashboard-__IDENTIFICADOR__ em volta da barra lateral
+   e do conteúdo. Começa igual ao padrão do UniDash; mude os valores para personalizar.
+   Lista completa dos tokens (e para que serve cada um): unidash-front/src/styles/tokens.css.
+   Ao trocar uma cor de texto ou de fundo, confira o contraste (texto: no mínimo 4,5:1). */
+
+.dashboard-__IDENTIFICADOR__ {
+  /* Barra lateral */
+  --cor-lateral: #121A2B;
+  --cor-lateral-texto: #FFFFFF;
+  --cor-lateral-texto-suave: #AEB6C6;
+  --cor-lateral-selecionado-fundo: rgba(255, 255, 255, 0.1);
+
+  /* Fundo da página e cartões */
+  --cor-fundo: #F5F6F8;
+  --cor-superficie: #FFFFFF;
+  --cor-borda: #DDE1E8;
+
+  /* Texto */
+  --cor-texto: #1A2233;
+  --cor-texto-suave: #566072;
+
+  /* Gráficos (a paleta completa entra na etapa 3) */
+  --cor-serie-1: #2A78D6;
+  --cor-grade: #E7E9EE;
+}

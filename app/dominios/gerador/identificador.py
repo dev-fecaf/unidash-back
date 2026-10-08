@@ -3,10 +3,14 @@
 Exemplo: "Executivo Financeiro – 2026" → "executivo_financeiro_2026"
 
 É usado no banco (coluna unidash.dashboard.slug), na pasta do dashboard no front
-(src/dashboards/<slug>/) e no schema do dashboard no DW (dash_<slug>). Por isso:
+(src/dashboards/<slug>/) e como nome do schema do dashboard no DW (o próprio slug, sem prefixo,
+gravado também em unidash.dashboard.schema_dw; decidido em 08/10/2026; o Gerador cria o schema,
+ver schema_dw.py). Por isso:
 - só letras minúsculas sem acento, números e "_" (o banco não aceita "-" em nome de schema sem aspas);
 - começa com letra;
-- no máximo 50 caracteres (o schema "dash_" + slug cabe no limite de 63 do PostgreSQL);
+- não pode ser um nome reservado do DW (public, stg, dim, fat, dataw, information_schema, pg_...):
+  o dashboard é RECUSADO (a pessoa escolhe outro nome); nada de prefixo (decidido em 08/10/2026);
+- no máximo 50 caracteres (cabe com folga no limite de 63 do PostgreSQL);
 - é gerado uma vez, no cadastro, e nunca muda (o banco também impede, por trigger).
 
 A mesma regra existe no front (src/paginas/area/gerador/identificador.js) para a prévia em tempo real.
@@ -18,6 +22,13 @@ import unicodedata
 
 TAMANHO_MAXIMO = 50
 PADRAO_VALIDO = re.compile(r"^[a-z][a-z0-9_]*$")
+# Schemas que já existem no DW (os ETLs dependem deles) ou que são do próprio PostgreSQL.
+# O banco também recusa os do DW (check dashboard_schema_dw_check em unidash.dashboard).
+RESERVADOS = {"public", "information_schema", "stg", "dim", "fat", "dataw"}
+
+
+def reservado(slug: str) -> bool:
+    return slug in RESERVADOS or slug.startswith("pg_")
 
 
 def gerar_slug(nome: str) -> str:

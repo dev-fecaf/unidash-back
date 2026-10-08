@@ -6,11 +6,14 @@ Regras combinadas (06/10/2026):
 - Todo dashboard precisa de pelo menos 1 página ativa, em qualquer status (decidido em 07/10/2026:
   o link de embed abre a primeira página). (A falta de configuração no
   front só gera um aviso, na tela.)
-- Não pode haver dois dashboards com o mesmo nome entre os não desativados.
 - Nome de categoria é único (o banco também garante).
-- Identificador (slug) do dashboard e da categoria: gerado do nome no cadastro, único e fixo
-  (o banco impede a troca). Se já existir (inclusive de um desativado), recebe _2, _3...
-  O da categoria fica só no banco (a tela mostra o nome como foi digitado).
+- Identificador (slug) da categoria: gerado do nome, único e fixo; se já existir, recebe _2, _3...
+  Fica só no banco (a tela mostra o nome como foi digitado).
+- Dashboard (decidido em 08/10/2026): o identificador é também o nome do schema no DW
+  (coluna schema_dw). Não pode haver dois dashboards com o mesmo título nem com o mesmo
+  identificador/schema, em nenhum status (desativado também conta): em vez de _2, o cadastro
+  é recusado (409). Também é recusado se o identificador for um nome reservado (422) ou se o
+  schema já existir no DW (409). O identificador é fixo (o banco impede a troca).
 
 Toda função que grava confirma a transação no final (commit). Se qualquer regra falhar no meio,
 nada é confirmado: a conexão é devolvida sem commit e o banco desfaz tudo.
@@ -18,7 +21,8 @@ nada é confirmado: a conexão é devolvida sem commit e o banco desfaz tudo.
 
 from sqlalchemy import Connection, text
 
-from app.dominios.gerador.identificador import com_sufixo, gerar_slug
+from app.dominios.gerador import schema_dw
+from app.dominios.gerador.identificador import com_sufixo, gerar_slug, reservado
 from app.dominios.gerador.modelos import (
     CategoriaAlterarIn,
     CategoriaIn,
@@ -125,7 +129,8 @@ def listar_dashboards(conexao: Connection) -> list[DashboardResumo]:
 
 def buscar_dashboard(conexao: Connection, hash_: str) -> DashboardDetalhe:
     d = _linha(conexao, """
-        SELECT d.id, d.hash, d.slug, d.nome, d.descricao, d.categoria_id, c.nome AS categoria, d.status,
+        SELECT d.id, d.hash, d.slug, d.schema_dw AS schema_gravado, d.nome, d.descricao, d.categoria_id,
+               c.nome AS categoria, d.status,
                d.responsavel_login, d.criado_em, d.atualizado_em
         FROM unidash.dashboard d
         JOIN unidash.categoria c ON c.id = d.categoria_id
@@ -138,8 +143,8 @@ def buscar_dashboard(conexao: Connection, hash_: str) -> DashboardDetalhe:
         WHERE dashboard_id = :id
         ORDER BY ativo DESC, ordem, id
     """, id=d["id"])
-    dados = {k: v for k, v in d.items() if k != "id"}
-    return DashboardDetalhe(**dados, paginas=[PaginaOut(**p) for p in paginas])
+    dados = {k: v for k, v in d.items() if k not in ("id", "schema_gravado")}
+    return DashboardDetalhe(**dados, schema_gravado=d["schema_gravado"], paginas=[PaginaOut(**p) for p in paginas])
 
 
 # Tabelas que têm identificador (lista fechada: o nome da tabela entra no SQL)
@@ -178,14 +183,39 @@ def conferir_regras_do_dashboard(dados: DashboardIn) -> None:
 
 
 def _conferir_nome_dashboard(conexao: Connection, dados: DashboardIn, hash_atual: str | None) -> None:
-    if dados.status == "desativado":
-        return  # desativados podem repetir nome
+    # Título único entre todos os dashboards, inclusive os desativados (decidido em 08/10/2026)
     repetido = _linha(conexao, """
-        SELECT hash, nome FROM unidash.dashboard
-        WHERE lower(nome) = lower(:nome) AND status <> 'desativado'
+        SELECT hash, nome, status FROM unidash.dashboard WHERE lower(nome) = lower(:nome)
     """, nome=dados.nome)
     if repetido and repetido["hash"] != hash_atual:
-        raise ErroCadastro(409, f"Já existe um dashboard ativo chamado \"{repetido['nome']}\".")
+        desativado = " (desativado)" if repetido["status"] == "desativado" else ""
+        raise ErroCadastro(409, f"Já existe um dashboard chamado \"{repetido['nome']}\"{desativado}.")
+
+
+def conferir_identificador_dashboard(conexao: Connection, nome: str, consultar_dw: bool = True) -> str:
+    """Identificador (= schema no DW) de um dashboard novo com este nome. Recusa em vez de pôr _2."""
+    slug = gerar_slug(nome)
+    if not slug:
+        raise ErroCadastro(422, "O nome precisa ter pelo menos uma letra ou um número.")
+    if reservado(slug):
+        raise ErroCadastro(422, f"O nome gera o schema \"{slug}\", que é reservado no DW. Escolha outro nome.")
+    repetido = _linha(conexao, """
+        SELECT nome, status FROM unidash.dashboard WHERE slug = :slug OR schema_dw = :slug
+    """, slug=slug)
+    if repetido:
+        desativado = " (desativado)" if repetido["status"] == "desativado" else ""
+        raise ErroCadastro(409, f"O schema \"{slug}\" já é do dashboard \"{repetido['nome']}\"{desativado}. Escolha outro nome.")
+    if consultar_dw and schema_dw.consultar(slug) == "existe":
+        raise ErroCadastro(409, f"Já existe um schema \"{slug}\" no DW. Escolha outro nome.")
+    return slug
+
+
+def gravar_schema_dw(conexao: Connection, hash_: str, slug: str) -> None:
+    """Dashboards antigos (sem schema_dw): grava o schema depois do "Criar agora"."""
+    conexao.execute(text("""
+        UPDATE unidash.dashboard SET schema_dw = :slug WHERE hash = :hash AND schema_dw IS NULL
+    """), {"slug": slug, "hash": hash_})
+    conexao.commit()
 
 
 def _conferir_categoria(conexao: Connection, categoria_id: int, categoria_atual: int | None) -> None:
@@ -228,13 +258,14 @@ def criar_dashboard(conexao: Connection, dados: DashboardIn, responsavel: str) -
     if any(p.codigo for p in dados.paginas):
         raise ErroCadastro(422, "Um dashboard novo não pode receber páginas que já existem.")
     _conferir_nome_dashboard(conexao, dados, hash_atual=None)
+    slug = conferir_identificador_dashboard(conexao, dados.nome)
     _conferir_categoria(conexao, dados.categoria_id, categoria_atual=None)
 
     novo = _linha(conexao, """
-        INSERT INTO unidash.dashboard (nome, slug, descricao, categoria_id, responsavel_login, status)
-        VALUES (:nome, :slug, :descricao, :categoria_id, :responsavel, :status)
+        INSERT INTO unidash.dashboard (nome, slug, schema_dw, descricao, categoria_id, responsavel_login, status)
+        VALUES (:nome, :slug, :slug, :descricao, :categoria_id, :responsavel, :status)
         RETURNING id, hash
-    """, nome=dados.nome, slug=proximo_slug(conexao, dados.nome), descricao=dados.descricao,
+    """, nome=dados.nome, slug=slug, descricao=dados.descricao,
         categoria_id=dados.categoria_id, responsavel=responsavel[:80], status=dados.status)
     _sincronizar_paginas(conexao, novo["id"], dados)
     conexao.commit()

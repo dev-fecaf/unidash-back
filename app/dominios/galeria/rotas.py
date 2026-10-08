@@ -8,10 +8,12 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Connection, text
 
 from app.db.sessao import obter_conexao
+from app.dominios.gerador import schema_dw
+from app.dominios.gerador.modelos import SchemaDwOut
 from app.dominios.portal.dependencias import exigir
 from app.dominios.portal.usuarios import UsuarioPortal
 
@@ -59,11 +61,17 @@ class DashboardPrevia(BaseModel):
     nome: str
     status: str
     paginas: list[PaginaPrevia]  # só as ativas, na ordem do Gerador
+    schema_dw: SchemaDwOut | None = None  # schema no DW e se existe (painel "Onde editar" da prévia)
+    schema_nome: str | None = Field(default=None, exclude=True)  # coluna schema_dw (uso interno)
 
 
 def buscar_para_previa(conexao: Connection, hash_: str) -> DashboardPrevia | None:
     dashboard = conexao.execute(
-        text("SELECT id, hash, slug, nome, status FROM unidash.dashboard WHERE hash = :hash"), {"hash": hash_}
+        text("""
+            SELECT id, hash, slug, nome, status, coalesce(schema_dw, slug) AS schema_nome
+            FROM unidash.dashboard WHERE hash = :hash
+        """),
+        {"hash": hash_},
     ).mappings().first()
     if dashboard is None:
         return None
@@ -91,4 +99,5 @@ def dashboard_previa(
     dashboard = buscar_para_previa(conexao, hash)
     if dashboard is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Dashboard não encontrado.")
-    return dashboard
+    nome = dashboard.schema_nome or dashboard.slug  # dashboards antigos: schema_dw vazio = identificador
+    return dashboard.model_copy(update={"schema_dw": SchemaDwOut(nome=nome, situacao=schema_dw.consultar(nome))})
